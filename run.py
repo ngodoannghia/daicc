@@ -26,7 +26,7 @@ def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu_id', type=str, default='0,1',  help='which gpu to use')
     parser.add_argument('--path', type=str, default='../..', help='path of csv file with DNA sequences and labels')
-    parser.add_argument('--epochs', type=int, default=25, help='number of epochs to train')
+    parser.add_argument('--epochs', type=int, default=100, help='number of epochs to train')
     parser.add_argument('--batch_size', type=int, default=32, help='size of each batch during training')
     parser.add_argument('--weight_decay', type=float, default=1e-5, help='weight dacay used in optimizer')
     parser.add_argument('--save_freq', type=int, default=1, help='saving checkpoints per save_freq epochs')
@@ -57,9 +57,10 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')# device = 
 
 #get features
 print("Loading data")
-train = pd.read_csv('analysis/pct_rank/train_pct_rank.csv')[['block_id', 'timestamp', 'sensor_01']]
-val = pd.read_csv('analysis/pct_rank/val_pct_rank.csv')[['block_id', 'timestamp', 'sensor_01']]
-
+# train = pd.read_csv('analysis/pct_rank/train_pct_rank.csv')[['block_id', 'timestamp', 'sensor_01', 'sensor_02', 'sensor_03', 'sensor_04', 'sensor_05', 'sensor_07', 'sensor_09']]
+# val = pd.read_csv('analysis/pct_rank/val_pct_rank.csv')[['block_id', 'timestamp', 'sensor_01', 'sensor_02', 'sensor_03', 'sensor_04', 'sensor_05', 'sensor_07', 'sensor_09']]
+train = pd.read_csv('analysis/train_denoise.csv')
+val = pd.read_csv('analysis/val_denoise.csv')
 target_train = pd.read_csv('analysis/train_label.csv')['anomalous'].to_numpy()
 target_val = pd.read_csv('analysis/val_label.csv')['anomalous'].to_numpy()
 

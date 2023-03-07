@@ -12,10 +12,10 @@ def denoise(df):
             df[col] = np.floor(df[col]*100) / 100
     return df
 
-train = pd.read_csv('train.csv')
+train = pd.read_csv('analysis/train.csv')
 train = denoise(train)
-train.to_csv('data/train_denoise.csv', index=False)
+train.to_csv('analysis/train_denoise.csv', index=False)
 
-test = pd.read_csv('val.csv')
+test = pd.read_csv('analysis/val.csv')
 test = denoise(test)
-test.to_csv('data/val_denoise.csv', index=False)
+test.to_csv('analysis/val_denoise.csv', index=False)
