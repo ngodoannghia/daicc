@@ -59,8 +59,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')# device = 
 print("Loading data")
 # train = pd.read_csv('analysis/pct_rank/train_pct_rank.csv')[['block_id', 'timestamp', 'sensor_01', 'sensor_02', 'sensor_03', 'sensor_04', 'sensor_05', 'sensor_07', 'sensor_09']]
 # val = pd.read_csv('analysis/pct_rank/val_pct_rank.csv')[['block_id', 'timestamp', 'sensor_01', 'sensor_02', 'sensor_03', 'sensor_04', 'sensor_05', 'sensor_07', 'sensor_09']]
-train = pd.read_csv('analysis/train_denoise.csv')
-val = pd.read_csv('analysis/val_denoise.csv')
+train = pd.read_csv('analysis/train.csv')[['block_id', 'timestamp', 'sensor_07', 'sensor_09']]
+val = pd.read_csv('analysis/val.csv')[['block_id', 'timestamp', 'sensor_07', 'sensor_09']]
 target_train = pd.read_csv('analysis/train_label.csv')['anomalous'].to_numpy()
 target_val = pd.read_csv('analysis/val_label.csv')['anomalous'].to_numpy()
 
