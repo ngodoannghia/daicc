@@ -92,8 +92,12 @@ class SAKTModel(nn.Module):
         self.nheads = nheads
         # self.pred = nn.Linear(embed_dim, nout)
         self.pred = nn.Sequential(
-                            nn.Linear(embed_dim*10, 128)
-                            ,nn.LeakyReLU()     
+                            nn.Linear(embed_dim*10, 512)
+                            ,nn.LeakyReLU()
+                            ,nn.Dropout(0.1)
+                            ,nn.Linear(512, 128)
+                            ,nn.LeakyReLU()
+                            ,nn.Dropout(0.1)
                             ,nn.Linear(128, nout)
                             ,nn.Sigmoid()
                     )
@@ -105,8 +109,6 @@ class SAKTModel(nn.Module):
 
         #categorical_features=self.cat_embedding(categorical_features).sum(-2)
         x = numerical_features#+categorical_features
-
-
 
         x = x.permute(1, 0, 2)
 
@@ -148,4 +150,8 @@ class SAKTModel(nn.Module):
 
         output = self.pred(x)
 
-        return output.squeeze(-1)
+        output = output.squeeze(-1)
+
+        # output = torch.mean(output, dim=-1)
+
+        return output

@@ -18,6 +18,7 @@ from ranger import Ranger
 import pickle
 import argparse
 from sklearn.preprocessing import RobustScaler, normalize
+from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import roc_auc_score
 from torch.optim.lr_scheduler import StepLR
 
@@ -25,8 +26,8 @@ def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu_id', type=str, default='0,1',  help='which gpu to use')
     parser.add_argument('--path', type=str, default='../..', help='path of csv file with DNA sequences and labels')
-    parser.add_argument('--epochs', type=int, default=100, help='number of epochs to train')
-    parser.add_argument('--batch_size', type=int, default=16, help='size of each batch during training')
+    parser.add_argument('--epochs', type=int, default=25, help='number of epochs to train')
+    parser.add_argument('--batch_size', type=int, default=32, help='size of each batch during training')
     parser.add_argument('--weight_decay', type=float, default=1e-5, help='weight dacay used in optimizer')
     parser.add_argument('--save_freq', type=int, default=1, help='saving checkpoints per save_freq epochs')
     parser.add_argument('--dropout', type=float, default=.1, help='transformer dropout')
@@ -39,10 +40,10 @@ def get_args():
     parser.add_argument('--max_seq', type=int, default=64, help='max_seq')
     parser.add_argument('--embed_dim', type=int, default=128, help='embedding dimension size')
     #parser.add_argument('--batch_size', type=int, default=2048, help='batch_size')
-    parser.add_argument('--nlayers', type=int, default=2, help='nlayers')
-    parser.add_argument('--rnnlayers', type=int, default=2, help='number of reisdual rnn blocks')
+    parser.add_argument('--nlayers', type=int, default=3, help='nlayers')
+    parser.add_argument('--rnnlayers', type=int, default=1, help='number of reisdual rnn blocks')
     parser.add_argument('--nfeatures', type=int, default=5, help='amount of features')
-    parser.add_argument('--nheads', type=int, default=8, help='number of self-attention heads')
+    parser.add_argument('--nheads', type=int, default=4, help='number of self-attention heads')
     parser.add_argument('--seed', type=int, default=2020, help='seed')
     parser.add_argument('--pos_encode', type=str, default='LSTM', help='method of positional encoding')
     opts = parser.parse_args()
@@ -56,31 +57,40 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')# device = 
 
 #get features
 print("Loading data")
-train = pd.read_csv('train.csv')
-test = pd.read_csv('val.csv')
+train = pd.read_csv('analysis/pct_rank/train_pct_rank.csv')[['block_id', 'timestamp', 'sensor_01']]
+val = pd.read_csv('analysis/pct_rank/val_pct_rank.csv')[['block_id', 'timestamp', 'sensor_01']]
 
-target_train = pd.read_csv('train_labels.csv')['anomalous'].to_numpy()
+target_train = pd.read_csv('analysis/train_label.csv')['anomalous'].to_numpy()
+target_val = pd.read_csv('analysis/val_label.csv')['anomalous'].to_numpy()
+
 # target_train = target_train[:, None]
-# target_train = np.repeat(target_train, 1, axis=1)
+# target_train = np.repeat(target_train, 10, axis=1)
+
+# target_val = target_val[:, None]
+# target_val = np.repeat(target_val, 10, axis=1)
 # target_test = pd.read_csv('val_labels.csv')['anomalous'].to_numpy()
 #exit()
 
 print("Dropping some features")
 
-train.drop(['block_id'], axis=1, inplace=True)
-test = test.drop(['block_id'], axis=1)
+train.drop(['block_id', 'timestamp'], axis=1, inplace=True)
+val = val.drop(['block_id', 'timestamp'], axis=1)
 
 print("Normalizing")
 RS = RobustScaler()
 train = RS.fit_transform(train)
-test = RS.transform(test)
+val = RS.transform(val)
+
+# MM = MinMaxScaler()
+# train = MM.fit_transform(train)
+# test = MM.transform(test)
 
 print("Reshaping")
 train = train.reshape(-1, 10, train.shape[-1])
-test = test.reshape(-1, 10, train.shape[-1])
+val = val.reshape(-1, 10, train.shape[-1])
 
-np.save('train',train)
-np.save('test',test)
+# np.save('train',train)
+# np.save('test',val)
 
 args.nfeatures=train.shape[-1]
 #exit()
@@ -96,10 +106,15 @@ kf = KFold(n_splits=args.nfolds,random_state=args.seed,shuffle=True)
 
 #exit()
 
-train_features=[train[i] for i in list(kf.split(train))[args.fold][0]]
-val_features=[train[i] for i in list(kf.split(train))[args.fold][1]]
-train_targets=[target_train[i] for i in list(kf.split(target_train))[args.fold][0]]
-val_targets=[target_train[i] for i in list(kf.split(target_train))[args.fold][1]]
+# train_features=[train[i] for i in list(kf.split(train))[args.fold][0]]
+# val_features=[train[i] for i in list(kf.split(train))[args.fold][1]]
+# train_targets=[target_train[i] for i in list(kf.split(target_train))[args.fold][0]]
+# val_targets=[target_train[i] for i in list(kf.split(target_train))[args.fold][1]]
+
+train_features = train 
+val_features = val 
+train_targets = target_train
+val_targets = target_val
 
 #exit()
 
@@ -126,7 +141,7 @@ model = SAKTModel(args.nfeatures, 1, embed_dim=args.embed_dim, pos_encode=args.p
                   max_seq=args.max_seq, nlayers=args.nlayers, rnnlayers=args.rnnlayers,
                   dropout=args.dropout,nheads=args.nheads).to(device)
 # optimizer = torch.optim.SGD(model.parameters(), lr=1e-3, momentum=0.99, weight_decay=0.005)
-#optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+# optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 #opt_level = 'O1'
 #model, optimizer = amp.initialize(model, optimizer, opt_level=opt_level)
 optimizer = Ranger(model.parameters(), lr=8e-4)
@@ -157,6 +172,7 @@ best_metric = 100
 cos_epoch=int(args.epochs*0.75)
 #scheduler=lr_AIAYN(optimizer,args.embed_dim,warmup_steps=3000)
 scheduler=torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,(args.epochs-cos_epoch)*len(train_dataloader))
+# scheduler = StepLR(optimizer, step_size=30, gamma=0.1)
 steps_per_epoch=len(train_dataloader)
 val_steps=len(val_dataloader)
 for epoch in range(args.epochs):
@@ -190,7 +206,8 @@ for epoch in range(args.epochs):
         #break
     print('')
     train_loss/=(step+1)
-
+    print ("Loss train: {:.3f} Time: {:.1f}"
+                           .format(train_loss, time.time()-t))
     #exit()
     model.eval()
     val_metric=[]
