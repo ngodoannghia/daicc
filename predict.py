@@ -39,9 +39,9 @@ def get_args():
     parser.add_argument('--embed_dim', type=int, default=128, help='embedding dimension size')
     #parser.add_argument('--batch_size', type=int, default=2048, help='batch_size')
     parser.add_argument('--nlayers', type=int, default=3, help='nlayers')
-    parser.add_argument('--rnnlayers', type=int, default=3, help='number of reisdual rnn blocks')
+    parser.add_argument('--rnnlayers', type=int, default=1, help='number of reisdual rnn blocks')
     parser.add_argument('--nfeatures', type=int, default=5, help='amount of features')
-    parser.add_argument('--nheads', type=int, default=4, help='number of self-attention heads')
+    parser.add_argument('--nheads', type=int, default=8, help='number of self-attention heads')
     parser.add_argument('--seed', type=int, default=2020, help='seed')
     parser.add_argument('--pos_encode', type=str, default='LSTM', help='method of positional encoding')
     opts = parser.parse_args()
@@ -52,60 +52,31 @@ args=get_args()
 os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')# device = torch.device("cpu")
 
+test = pd.read_csv('analysis/test.csv')
+train = pd.read_csv('analysis/train.csv')
 
-#get features
-t=time.time()
-feature_cols = ['R', 'C','time_step','u_in','u_out']
-target_cols = ['pressure']
+label = pd.read_csv('analysis/train_label.csv')
 
-train = pd.read_csv(os.path.join(args.path,'train.csv'))
-test = pd.read_csv(os.path.join(args.path,'test.csv'))
+submission=pd.read_csv('data/sample_submission.csv')
 
-all_pressure = np.sort( train.pressure.unique() )
-PRESSURE_MIN = all_pressure[0]
-PRESSURE_STEP = all_pressure[1] - all_pressure[0]
-
-with open('../pressure_min_step.txt','w+') as f:
-    f.write(f'PRESSURE_MIN: {PRESSURE_MIN}\n') #-1.895744294564641
-    f.write(f'PRESSURE_STEP: {PRESSURE_STEP}\n') #0.07030214545121005
-
-
-submission=pd.read_csv(os.path.join(args.path,'sample_submission.csv'))
-
-targets = train[['pressure']].to_numpy().reshape(-1, 80)
 #exit()
 
-if os.path.isfile('train.npy') and os.path.isfile('test.npy'):
-    train=np.load('train.npy')
-    test=np.load('test.npy')
-    columns=np.load('columns.npy',allow_pickle=True)
-else:
-    print("Adding features")
-    train = add_features(train)
-    test = add_features(test)
+print("Dropping some features")
 
-    print("Dropping some features")
+train.drop(['block_id', 'timestamp'], axis=1, inplace=True)
+test = test.drop(['block_id', 'timestamp'], axis=1)
 
-    train.drop(['pressure', 'id', 'breath_id'], axis=1, inplace=True)
-    test = test.drop(['id', 'breath_id'], axis=1)
-    columns=train.columns
-    np.save('columns',np.array(train.columns))
+print("Normalizing")
+RS = RobustScaler()
+train = RS.fit_transform(train)
+test = RS.transform(test)
 
-    print("Normalizing")
-    RS = RobustScaler()
-    train = RS.fit_transform(train)
-    test = RS.transform(test)
-
-    print("Reshaping")
-    train = train.reshape(-1, 80, train.shape[-1])
-    test = test.reshape(-1, 80, train.shape[-1])
-
-    np.save('train',train)
-    np.save('test',test)
-
+print("Reshaping")
+test = test.reshape(-1, 10, train.shape[-1])
+train = train.reshape(-1, 10, train.shape[-1])
 args.nfeatures=train.shape[-1]
 
-test_dataset = TestDataset(test)
+test_dataset = TestDataset(train)
 test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.workers)
 
 
@@ -113,17 +84,17 @@ model_dir=f'{args.pos_encode}_rnn{args.rnnlayers}_transformer{args.nlayers}_mode
 log_dir=f'{args.pos_encode}_rnn{args.rnnlayers}_transformer{args.nlayers}_logs'
 results_dir=f'{args.pos_encode}_rnn{args.rnnlayers}_transformer{args.nlayers}_val_results'
 
-MODELS=[]
-for fold in range(args.nfolds):
-    model = SAKTModel(args.nfeatures, 10, 1, embed_dim=args.embed_dim, pos_encode=args.pos_encode,
-                      max_seq=args.max_seq, nlayers=args.nlayers,rnnlayers=args.rnnlayers,
-                      dropout=args.dropout,nheads=args.nheads).to(device)
-    model=nn.DataParallel(model)
-    model.load_state_dict(torch.load(f'{model_dir}/model{fold}.pth'))
-    model.eval()
-    MODELS.append(model)
-    pytorch_total_params = sum(p.numel() for p in model.parameters())
-    print('Total number of paramters: {}'.format(pytorch_total_params))
+# MODELS=[]
+# for fold in range(args.nfolds):
+#     model = SAKTModel(args.nfeatures, 10, 1, embed_dim=args.embed_dim, pos_encode=args.pos_encode,
+#                       max_seq=args.max_seq, nlayers=args.nlayers,rnnlayers=args.rnnlayers,
+#                       dropout=args.dropout,nheads=args.nheads).to(device)
+#     model=nn.DataParallel(model)
+#     model.load_state_dict(torch.load(f'{model_dir}/model{fold}.pth'))
+#     model.eval()
+#     MODELS.append(model)
+#     pytorch_total_params = sum(p.numel() for p in model.parameters())
+#     print('Total number of paramters: {}'.format(pytorch_total_params))
 
 #exit()
 
@@ -137,32 +108,44 @@ for fold in range(args.nfolds):
 #     model.load_state_dict(torch.load(f'GRU_models/model{fold}.pth'))
 #     model.eval()
 #     MODELS.append(model)
-
-
+model = SAKTModel(args.nfeatures, 1, embed_dim=args.embed_dim, pos_encode=args.pos_encode,
+                  max_seq=args.max_seq, nlayers=args.nlayers, rnnlayers=args.rnnlayers,
+                  dropout=args.dropout,nheads=args.nheads).to(device)
+model=nn.DataParallel(model)
+model.load_state_dict(torch.load('LSTM_rnn1_transformer3_models/model0.pth'))
+model.eval()
 preds=[]
 for batch in tqdm(test_dataloader):
     features=batch.to(device)
     #features=features
     with torch.no_grad():
         temp=[]
-        for model in MODELS:
-            output=model(features,None)
-            temp.append(output)
+        # for model in MODELS:
+        #     output=model(features,None)
+        #     temp.append(output)
+        output = model(features, None)
         #temp=torch.mean(torch.stack(temp,0),0)#[0]
         #temp=torch.median(torch.stack(temp,0),0)[0]
-        temp=torch.stack(temp,1)
+        # temp=torch.stack(temp,1)
         #temp=torch.round( (temp - PRESSURE_MIN)/PRESSURE_STEP ) * PRESSURE_STEP + PRESSURE_MIN
 
-        preds.append(temp.cpu())
+        preds.append(output.cpu())
 
 preds=torch.cat(preds)#.reshape(-1).numpy()
 
-post_processed=torch.median(preds,1)[0].reshape(-1)
-post_processed=torch.round( (post_processed - PRESSURE_MIN)/PRESSURE_STEP ) * PRESSURE_STEP + PRESSURE_MIN
-submission['pressure']=post_processed.numpy()
+# post_processed=torch.median(preds,1)[0].reshape(-1)
+# post_processed=torch.round( (post_processed - PRESSURE_MIN)/PRESSURE_STEP ) * PRESSURE_STEP + PRESSURE_MIN
+
+
+submission = pd.DataFrame(data=preds.numpy(), columns=['anomaly_score'])
+submission['block_id'] = label['block_id'].values
+submission['anomaly'] = label['anomalous'].values
+# submission['anomaly_score'] = preds.numpy()
+
+# submission['anomaly_score']=preds.numpy()
 submission.to_csv('submission.csv',index=False)
 
-torch.save(preds,'predictions.b')
+# torch.save(preds,'predictions.b')
 
 # for i in range(args.nfolds):
 #     post_processed=preds[:,i].reshape(-1)
