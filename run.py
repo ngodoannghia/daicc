@@ -22,12 +22,27 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import roc_auc_score
 from torch.optim.lr_scheduler import StepLR
 
+def seed_everything(seed: int):
+    import random, os
+    import numpy as np
+    import torch
+    
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = True
+    
+seed_everything(2020)
+
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu_id', type=str, default='0,1',  help='which gpu to use')
     parser.add_argument('--path', type=str, default='../..', help='path of csv file with DNA sequences and labels')
     parser.add_argument('--epochs', type=int, default=100, help='number of epochs to train')
-    parser.add_argument('--batch_size', type=int, default=32, help='size of each batch during training')
+    parser.add_argument('--batch_size', type=int, default=128, help='size of each batch during training')
     parser.add_argument('--weight_decay', type=float, default=1e-5, help='weight dacay used in optimizer')
     parser.add_argument('--save_freq', type=int, default=1, help='saving checkpoints per save_freq epochs')
     parser.add_argument('--dropout', type=float, default=.1, help='transformer dropout')
@@ -40,8 +55,8 @@ def get_args():
     parser.add_argument('--max_seq', type=int, default=64, help='max_seq')
     parser.add_argument('--embed_dim', type=int, default=128, help='embedding dimension size')
     #parser.add_argument('--batch_size', type=int, default=2048, help='batch_size')
-    parser.add_argument('--nlayers', type=int, default=3, help='nlayers')
-    parser.add_argument('--rnnlayers', type=int, default=1, help='number of reisdual rnn blocks')
+    parser.add_argument('--nlayers', type=int, default=5, help='nlayers')
+    parser.add_argument('--rnnlayers', type=int, default=5, help='number of reisdual rnn blocks')
     parser.add_argument('--nfeatures', type=int, default=5, help='amount of features')
     parser.add_argument('--nheads', type=int, default=4, help='number of self-attention heads')
     parser.add_argument('--seed', type=int, default=2020, help='seed')
@@ -59,9 +74,9 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')# device = 
 print("Loading data")
 # train = pd.read_csv('analysis/pct_rank/train_pct_rank.csv')[['block_id', 'timestamp', 'sensor_01', 'sensor_02', 'sensor_03', 'sensor_04', 'sensor_05', 'sensor_07', 'sensor_09']]
 # val = pd.read_csv('analysis/pct_rank/val_pct_rank.csv')[['block_id', 'timestamp', 'sensor_01', 'sensor_02', 'sensor_03', 'sensor_04', 'sensor_05', 'sensor_07', 'sensor_09']]
-train = pd.read_csv('analysis/train.csv')[['block_id', 'timestamp', 'sensor_07', 'sensor_09']]
-val = pd.read_csv('analysis/val.csv')[['block_id', 'timestamp', 'sensor_07', 'sensor_09']]
-target_train = pd.read_csv('analysis/train_label.csv')['anomalous'].to_numpy()
+train = pd.read_csv('analysis/train_denoise.csv')
+val = pd.read_csv('analysis/val_denoise.csv')
+target_train = pd.read_csv('analysis/train_upsample_label.csv')['anomalous'].to_numpy()
 target_val = pd.read_csv('analysis/val_label.csv')['anomalous'].to_numpy()
 
 # target_train = target_train[:, None]
@@ -69,6 +84,7 @@ target_val = pd.read_csv('analysis/val_label.csv')['anomalous'].to_numpy()
 
 # target_val = target_val[:, None]
 # target_val = np.repeat(target_val, 10, axis=1)
+
 # target_test = pd.read_csv('val_labels.csv')['anomalous'].to_numpy()
 #exit()
 
@@ -80,11 +96,11 @@ val = val.drop(['block_id', 'timestamp'], axis=1)
 print("Normalizing")
 RS = RobustScaler()
 train = RS.fit_transform(train)
-val = RS.transform(val)
+val = RS.fit_transform(val)
 
 # MM = MinMaxScaler()
 # train = MM.fit_transform(train)
-# test = MM.transform(test)
+# val = MM.transform(val)
 
 print("Reshaping")
 train = train.reshape(-1, 10, train.shape[-1])
@@ -141,11 +157,11 @@ del val_features
 model = SAKTModel(args.nfeatures, 1, embed_dim=args.embed_dim, pos_encode=args.pos_encode,
                   max_seq=args.max_seq, nlayers=args.nlayers, rnnlayers=args.rnnlayers,
                   dropout=args.dropout,nheads=args.nheads).to(device)
-# optimizer = torch.optim.SGD(model.parameters(), lr=1e-3, momentum=0.99, weight_decay=0.005)
+optimizer = torch.optim.SGD(model.parameters(), lr=1e-3, momentum=0.99, weight_decay=0.005)
 # optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 #opt_level = 'O1'
 #model, optimizer = amp.initialize(model, optimizer, opt_level=opt_level)
-optimizer = Ranger(model.parameters(), lr=8e-4)
+# optimizer = Ranger(model.parameters(), lr=1e-4)
 criterion = nn.BCELoss()
 
 
@@ -192,6 +208,8 @@ for epoch in range(args.epochs):
         output=model(features,None)
         #exit()
         #exit()
+        # print("Output: ", output)
+        # print("Target: ", targets)
         loss=criterion(output,targets)#*loss_weight_vector
         loss.backward()
         # with amp.scale_loss(loss, optimizer) as scaled_loss:
@@ -205,6 +223,7 @@ for epoch in range(args.epochs):
         if epoch > cos_epoch:
             scheduler.step()
         #break
+    # scheduler.step()
     print('')
     train_loss/=(step+1)
     print ("Loss train: {:.3f} Time: {:.1f}"
