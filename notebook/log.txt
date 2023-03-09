@@ -1,0 +1,10 @@
+Fold 0: val metric: 0.6900603884445895
+Fold 1: val metric: 0.9014084507042254
+Fold 2: val metric: 0.7626741899632383
+Fold 3: val metric: 0.7862724790509369
+Fold 4: val metric: 0.8133928571428571
+Fold 5: val metric: 0.7633477633477633
+Fold 6: val metric: 0.9052491103202848
+Fold 7: val metric: 0.8808849743105799
+Fold 8: val metric: 0.8888044579533941
+Fold 9: val metric: 0.8090524911032029

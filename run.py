@@ -45,12 +45,12 @@ seed_everything(2020)
 def denoise(df):
     for col in tqdm(df.columns):
         if col not in ['timestamp','block_id']:
-            df[col] = np.floor(df[col]*1000) / 1000
+            df[col] = np.floor(df[col]*100) / 100
     return df
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--gpu_id', type=str, default='1',  help='which gpu to use')
+    parser.add_argument('--gpu_id', type=str, default='0',  help='which gpu to use')
     parser.add_argument('--path', type=str, default='../..', help='path of csv file with DNA sequences and labels')
     parser.add_argument('--epochs', type=int, default=100, help='number of epochs to train')
     parser.add_argument('--batch_size', type=int, default=128, help='size of each batch during training')
@@ -112,12 +112,6 @@ target_val = pd.read_csv('analysis/val_label.csv')['anomalous'].to_numpy()
 
 # target_test = pd.read_csv('val_labels.csv')['anomalous'].to_numpy()
 #exit()
-train['timestamp'] = train['timestamp'].apply(lambda x: str(x).split()[-1].split(':')[0])
-val['timestamp'] = val['timestamp'].apply(lambda x: str(x).split()[-1].split(':')[0])
-
-train = pd.get_dummies(train, columns=['timestamp'])
-val = pd.get_dummies(val, columns=['timestamp'])
-
 
 if args.denoise:
     train = denoise(train)
@@ -125,12 +119,11 @@ if args.denoise:
 
 print("Dropping some features")
 
-train.drop(['block_id'], axis=1, inplace=True)
-val = val.drop(['block_id'], axis=1)
+train.drop(['block_id', 'timestamp'], axis=1, inplace=True)
+val = val.drop(['block_id', 'timestamp'], axis=1)
 
 print("Normalizing")
-# RS = RobustScaler()
-RS = MinMaxScaler()
+RS = RobustScaler()
 train = RS.fit_transform(train)
 val = RS.transform(val)
 
@@ -196,7 +189,7 @@ model = SAKTModel(args.nfeatures, 1, embed_dim=args.embed_dim, pos_encode=args.p
                   max_seq=args.max_seq, nlayers=args.nlayers, rnnlayers=args.rnnlayers,
                   dropout=args.dropout,nheads=args.nheads).to(device)
 
-optimizer = torch.optim.SGD(model.parameters(), lr=1e-4, momentum=0.99, weight_decay=0.01)
+optimizer = torch.optim.SGD(model.parameters(), lr=1e-2, momentum=0.99, weight_decay=0.01)
 # optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 #opt_level = 'O1'
 #model, optimizer = amp.initialize(model, optimizer, opt_level=opt_level)
@@ -217,8 +210,8 @@ log_dir=f'{args.pos_encode}_rnn{args.rnnlayers}_transformer{args.nlayers}_logs'
 results_dir=f'{args.pos_encode}_rnn{args.rnnlayers}_transformer{args.nlayers}_val_results'
 
 current_time = datetime.now()
-f_logs = 'logs/' + str(current_time)
-os.mkdir('logs/' + str(current_time))
+f_logs = 'logs/' + str(current_time).replace(':', '-')
+os.mkdir(f_logs)
 
 os.mkdir(f'{f_logs}/{log_dir}')
 logger=CSVLogger(['epoch','train_loss','val_loss','val_auc', 'val_auc_2'],f'{f_logs}/{log_dir}/log_fold{args.fold}.csv')
