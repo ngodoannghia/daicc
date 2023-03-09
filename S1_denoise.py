@@ -9,12 +9,12 @@ from tqdm import tqdm
 def denoise(df):
     for col in tqdm(df.columns):
         if col not in ['timestamp','block_id']:
-            df[col] = np.floor(df[col]*100) / 100
+            df[col] = np.floor(df[col]*1000) / 1000
     return df
 
-train = pd.read_csv('analysis/train_upsample.csv')
+train = pd.read_csv('analysis/sample/data_train_suffle.csv')
 train = denoise(train)
-train.to_csv('analysis/train_denoise.csv', index=False)
+train.to_csv('analysis/train_suffle_denoise.csv', index=False)
 
 test = pd.read_csv('analysis/val.csv')
 test = denoise(test)

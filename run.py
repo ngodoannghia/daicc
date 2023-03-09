@@ -14,13 +14,18 @@ import time
 from Dataset import *
 from Network import *
 from Functions import *
-from ranger import Ranger
+# from ranger import Ranger
 import pickle
 import argparse
 from sklearn.preprocessing import RobustScaler, normalize
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.metrics import roc_auc_score
+from sklearn import metrics
 from torch.optim.lr_scheduler import StepLR
+from datetime import datetime
+
+import scikitplot as skplt
+import matplotlib.pyplot as plt
 
 def seed_everything(seed: int):
     import random, os
@@ -37,9 +42,15 @@ def seed_everything(seed: int):
     
 seed_everything(2020)
 
+def denoise(df):
+    for col in tqdm(df.columns):
+        if col not in ['timestamp','block_id']:
+            df[col] = np.floor(df[col]*1000) / 1000
+    return df
+
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--gpu_id', type=str, default='0,1',  help='which gpu to use')
+    parser.add_argument('--gpu_id', type=str, default='1',  help='which gpu to use')
     parser.add_argument('--path', type=str, default='../..', help='path of csv file with DNA sequences and labels')
     parser.add_argument('--epochs', type=int, default=100, help='number of epochs to train')
     parser.add_argument('--batch_size', type=int, default=128, help='size of each batch during training')
@@ -61,6 +72,7 @@ def get_args():
     parser.add_argument('--nheads', type=int, default=4, help='number of self-attention heads')
     parser.add_argument('--seed', type=int, default=2020, help='seed')
     parser.add_argument('--pos_encode', type=str, default='LSTM', help='method of positional encoding')
+    parser.add_argument('--denoise', type=bool, default=True, help='decrease noise')
     opts = parser.parse_args()
     return opts
 
@@ -74,10 +86,23 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')# device = 
 print("Loading data")
 # train = pd.read_csv('analysis/pct_rank/train_pct_rank.csv')[['block_id', 'timestamp', 'sensor_01', 'sensor_02', 'sensor_03', 'sensor_04', 'sensor_05', 'sensor_07', 'sensor_09']]
 # val = pd.read_csv('analysis/pct_rank/val_pct_rank.csv')[['block_id', 'timestamp', 'sensor_01', 'sensor_02', 'sensor_03', 'sensor_04', 'sensor_05', 'sensor_07', 'sensor_09']]
-train = pd.read_csv('analysis/train_denoise.csv')
-val = pd.read_csv('analysis/val_denoise.csv')
-target_train = pd.read_csv('analysis/train_upsample_label.csv')['anomalous'].to_numpy()
+train = pd.read_csv('analysis/train.csv')
+val = pd.read_csv('analysis/val.csv')
+target_train = pd.read_csv('analysis/train_label.csv')['anomalous'].to_numpy()
 target_val = pd.read_csv('analysis/val_label.csv')['anomalous'].to_numpy()
+
+# Add feature
+# train_suffle = pd.read_csv('analysis/suffle/train_suffle_100.csv')
+# target_train_shuffle = pd.read_csv('analysis/suffle/train_label_suffle_100.csv')
+
+# train_new_data = pd.read_csv('analysis/new_data/new_data.csv')
+# target_new_data = pd.read_csv('analysis/new_data/df_new_data_label.csv')
+
+# Combine
+# train = pd.concat([train, train_new_data], axis=0)
+# target_train = pd.concat([target_train,target_new_data], axis=0)
+
+# target_train = target_train['anomalous'].to_numpy()
 
 # target_train = target_train[:, None]
 # target_train = np.repeat(target_train, 10, axis=1)
@@ -87,16 +112,27 @@ target_val = pd.read_csv('analysis/val_label.csv')['anomalous'].to_numpy()
 
 # target_test = pd.read_csv('val_labels.csv')['anomalous'].to_numpy()
 #exit()
+train['timestamp'] = train['timestamp'].apply(lambda x: str(x).split()[-1].split(':')[0])
+val['timestamp'] = val['timestamp'].apply(lambda x: str(x).split()[-1].split(':')[0])
+
+train = pd.get_dummies(train, columns=['timestamp'])
+val = pd.get_dummies(val, columns=['timestamp'])
+
+
+if args.denoise:
+    train = denoise(train)
+    val = denoise(val)
 
 print("Dropping some features")
 
-train.drop(['block_id', 'timestamp'], axis=1, inplace=True)
-val = val.drop(['block_id', 'timestamp'], axis=1)
+train.drop(['block_id'], axis=1, inplace=True)
+val = val.drop(['block_id'], axis=1)
 
 print("Normalizing")
-RS = RobustScaler()
+# RS = RobustScaler()
+RS = MinMaxScaler()
 train = RS.fit_transform(train)
-val = RS.fit_transform(val)
+val = RS.transform(val)
 
 # MM = MinMaxScaler()
 # train = MM.fit_transform(train)
@@ -105,6 +141,8 @@ val = RS.fit_transform(val)
 print("Reshaping")
 train = train.reshape(-1, 10, train.shape[-1])
 val = val.reshape(-1, 10, train.shape[-1])
+
+print(train[0])
 
 # np.save('train',train)
 # np.save('test',val)
@@ -157,7 +195,8 @@ del val_features
 model = SAKTModel(args.nfeatures, 1, embed_dim=args.embed_dim, pos_encode=args.pos_encode,
                   max_seq=args.max_seq, nlayers=args.nlayers, rnnlayers=args.rnnlayers,
                   dropout=args.dropout,nheads=args.nheads).to(device)
-optimizer = torch.optim.SGD(model.parameters(), lr=1e-3, momentum=0.99, weight_decay=0.005)
+
+optimizer = torch.optim.SGD(model.parameters(), lr=1e-4, momentum=0.99, weight_decay=0.01)
 # optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 #opt_level = 'O1'
 #model, optimizer = amp.initialize(model, optimizer, opt_level=opt_level)
@@ -169,7 +208,7 @@ criterion = nn.BCELoss()
 # model, optimizer = amp.initialize(model, optimizer, opt_level=opt_level)
 
 model=nn.DataParallel(model)
-
+# model.load_state_dict(torch.load("logs/2023-03-09 17:28:19.907766/LSTM_rnn5_transformer5_models/model0.pth"))
 #model.load_state_dict(torch.load('models/model1_epoch6.pth'))
 
 from Logger import *
@@ -177,21 +216,30 @@ model_dir=f'{args.pos_encode}_rnn{args.rnnlayers}_transformer{args.nlayers}_mode
 log_dir=f'{args.pos_encode}_rnn{args.rnnlayers}_transformer{args.nlayers}_logs'
 results_dir=f'{args.pos_encode}_rnn{args.rnnlayers}_transformer{args.nlayers}_val_results'
 
-os.system(f'mkdir {log_dir}')
-logger=CSVLogger(['epoch','train_loss','val_loss','val_mcmae'],f'{log_dir}/log_fold{args.fold}.csv')
-os.system(f'mkdir {model_dir}')
-os.system(f'mkdir {results_dir}')
+current_time = datetime.now()
+f_logs = 'logs/' + str(current_time)
+os.mkdir('logs/' + str(current_time))
+
+os.mkdir(f'{f_logs}/{log_dir}')
+logger=CSVLogger(['epoch','train_loss','val_loss','val_auc', 'val_auc_2'],f'{f_logs}/{log_dir}/log_fold{args.fold}.csv')
+os.mkdir(f'{f_logs}/{model_dir}')
+os.mkdir(f'{f_logs}/{results_dir}')
 
 #exit()
 
-val_metric = 100
-best_metric = 100
+val_metric = -1
+best_metric = -1
 cos_epoch=int(args.epochs*0.75)
 #scheduler=lr_AIAYN(optimizer,args.embed_dim,warmup_steps=3000)
 scheduler=torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,(args.epochs-cos_epoch)*len(train_dataloader))
 # scheduler = StepLR(optimizer, step_size=30, gamma=0.1)
 steps_per_epoch=len(train_dataloader)
 val_steps=len(val_dataloader)
+
+his_val_loss = []
+his_val_metric = []
+his_val_metric_2 = []
+
 for epoch in range(args.epochs):
     print(f"Epoch: {epoch}")
     model.train()
@@ -254,15 +302,37 @@ for epoch in range(args.epochs):
     truths=torch.cat(truths).numpy()
     # val_metric=(np.abs(truths-preds)*masks).sum()/masks.sum()#*stds['pressure']
     val_metric = roc_auc_score(truths, preds)
+    fpr, tpr, th = metrics.roc_curve(truths, preds)
+    val_metric_2 = metrics.auc(fpr, tpr)
+    
     #exit()
     print('')
     val_loss/=(step+1)
+    
+    his_val_loss.append(val_loss)
+    his_val_metric.append(val_metric)
+    his_val_metric_2.append(val_metric_2)
 
-    logger.log([epoch+1,train_loss,val_loss,val_metric])
+    logger.log([epoch+1,train_loss,val_loss,val_metric, val_metric_2])
     print(f"Val metric: {val_metric}, Val loss: {val_loss}")
 
-    if val_metric < best_metric:
+    if val_metric > best_metric:
         best_metric=val_metric
-        torch.save(model.state_dict(),f'{model_dir}/model{args.fold}.pth')
-        with open(f'{results_dir}/fold{args.fold}.p','wb+') as f:
+        torch.save(model.state_dict(),f'{f_logs}/{model_dir}/model{args.fold}.pth')
+        with open(f'{f_logs}/{results_dir}/fold{args.fold}.p','wb+') as f:
             pickle.dump([preds,truths],f)
+        
+        fpr, tpr, th = metrics.roc_curve(truths, preds)
+        val_metric_2 = metrics.auc(fpr, tpr)
+        display = metrics.RocCurveDisplay(fpr=fpr, tpr=tpr, roc_auc=val_metric_2, estimator_name='LSTM')
+        display.plot()
+        plt.savefig(f'{f_logs}/auc_of_roc.png')
+        plt.clf()
+    
+plt.plot(his_val_loss, his_val_metric)
+plt.savefig(f'{f_logs}/his_val_loss_metric.png')
+plt.clf()
+plt.plot(his_val_loss, his_val_metric_2)
+plt.savefig(f'{f_logs}/his_val_loss_metric_2.png')
+
+    

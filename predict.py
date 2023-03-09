@@ -15,7 +15,7 @@ from Dataset import *
 from Network import *
 from Functions import *
 
-from ranger import Ranger
+# from ranger import Ranger
 import pickle
 import argparse
 from sklearn.preprocessing import RobustScaler, normalize
@@ -38,8 +38,8 @@ def get_args():
     parser.add_argument('--max_seq', type=int, default=64, help='max_seq')
     parser.add_argument('--embed_dim', type=int, default=128, help='embedding dimension size')
     #parser.add_argument('--batch_size', type=int, default=2048, help='batch_size')
-    parser.add_argument('--nlayers', type=int, default=3, help='nlayers')
-    parser.add_argument('--rnnlayers', type=int, default=1, help='number of reisdual rnn blocks')
+    parser.add_argument('--nlayers', type=int, default=5, help='nlayers')
+    parser.add_argument('--rnnlayers', type=int, default=5, help='number of reisdual rnn blocks')
     parser.add_argument('--nfeatures', type=int, default=5, help='amount of features')
     parser.add_argument('--nheads', type=int, default=8, help='number of self-attention heads')
     parser.add_argument('--seed', type=int, default=2020, help='seed')
@@ -76,7 +76,7 @@ test = test.reshape(-1, 10, train.shape[-1])
 train = train.reshape(-1, 10, train.shape[-1])
 args.nfeatures=train.shape[-1]
 
-test_dataset = TestDataset(train)
+test_dataset = TestDataset(test)
 test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.workers)
 
 
@@ -112,7 +112,7 @@ model = SAKTModel(args.nfeatures, 1, embed_dim=args.embed_dim, pos_encode=args.p
                   max_seq=args.max_seq, nlayers=args.nlayers, rnnlayers=args.rnnlayers,
                   dropout=args.dropout,nheads=args.nheads).to(device)
 model=nn.DataParallel(model)
-model.load_state_dict(torch.load('LSTM_rnn1_transformer3_models/model0.pth'))
+model.load_state_dict(torch.load('logs/2023-03-09 17:47:59.196557/LSTM_rnn5_transformer5_models/model0.pth'))
 model.eval()
 preds=[]
 for batch in tqdm(test_dataloader):
@@ -137,12 +137,10 @@ preds=torch.cat(preds)#.reshape(-1).numpy()
 # post_processed=torch.round( (post_processed - PRESSURE_MIN)/PRESSURE_STEP ) * PRESSURE_STEP + PRESSURE_MIN
 
 
-submission = pd.DataFrame(data=preds.numpy(), columns=['anomaly_score'])
-submission['block_id'] = label['block_id'].values
-submission['anomaly'] = label['anomalous'].values
-# submission['anomaly_score'] = preds.numpy()
-
-# submission['anomaly_score']=preds.numpy()
+# submission = pd.DataFrame(data=preds.numpy(), columns=['anomaly_score'])
+# submission['block_id'] = label['block_id'].values
+# submission['anomaly'] = label['anomalous'].values
+submission['anomaly_score'] = preds.numpy()
 submission.to_csv('submission.csv',index=False)
 
 # torch.save(preds,'predictions.b')
